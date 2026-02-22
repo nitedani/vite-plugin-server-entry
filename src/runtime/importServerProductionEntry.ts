@@ -90,6 +90,16 @@ function isServerEntryOutsideOfCwd(paths: AutoImporterPaths): boolean | null {
   // We cannot check edge environments. Upon edge deployment the server code is usually bundled right after `$ vite build`, so it's unlikley that the resolved serverEntryFilePath doesn't belong to cwd
   if (!cwd) return null
 
+  // In a monorepo, multiple projects share the same autoImporter.js in hoisted node_modules.
+  // Check that the project root that wrote this autoImporter matches the current working directory.
+  if (paths.projectRoot) {
+    const projectRoot = toPosixPath(paths.projectRoot)
+    assertPosixPath(cwd)
+    if (!cwd.startsWith(projectRoot)) {
+      return true
+    }
+  }
+
   let serverEntryFilePath: string
   try {
     serverEntryFilePath = paths.serverEntryFilePathResolved()
@@ -97,7 +107,9 @@ function isServerEntryOutsideOfCwd(paths: AutoImporterPaths): boolean | null {
     // serverEntryFilePathResolved() calls import.meta.resolve() / require.resolve()
     // - Edge environments don't support import.meta.resolve() / require.resolve()
     // - This code block is executed on edge environments that implement a dummy `process.cwd()` e.g. on Cloudflare Workers `process.cwd() === '/'`
-    return null
+    // Fallback: use the absolute path stored at build time instead of returning null,
+    // which would bypass the CWD check and potentially load the wrong project's entry.
+    serverEntryFilePath = paths.serverEntryFilePathOriginal
   }
   serverEntryFilePath = removeFilePrefix(serverEntryFilePath)
 

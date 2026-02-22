@@ -17,4 +17,6 @@ export type AutoImporterPaths = {
   serverEntryFilePathRelative: string
   serverEntryFilePathOriginal: string
   serverEntryFilePathResolved: () => string
+  /** The Vite config root of the project that wrote this autoImporter. Used to prevent cross-project mixups in monorepos. */
+  projectRoot?: string
 }
