@@ -82,6 +82,9 @@ type ConfigUnresolved = ConfigVite & {
 type ConfigResolved = ConfigVite & {
   _vitePluginServerEntry: PluginConfigResolved
 }
+// Structural view of a Vite environment's build config — kept minimal so that this plugin keeps
+// building against Vite versions that predate the Environment API.
+type EnvBuildConfig = { build: { rollupOptions: { input?: string | string[] | Record<string, string> } } }
 
 /**
  * This plugin does two things:
@@ -139,16 +142,17 @@ function serverProductionEntryPlugin(pluginConfigProvidedByLibrary: PluginConfig
             isNotLeaderInstance = !isLeaderPluginInstance(config, libraryName)
             assert([undefined, isNotLeaderInstance].includes(prev))
           }
-          if (skip(undefined)) return
+          if (isNotLeaderInstance) return
+
+          const serverRollupOptions = getServerRollupOptions(config)
+          if (!serverRollupOptions) return
 
           assertApiVersions(config, pluginConfigProvidedByLibrary.libraryName)
-
           applyPluginConfigProvidedByUser(config)
 
-          if (!config._vitePluginServerEntry.disableServerEntryEmit) {
-            const serverEntryName = getServerEntryName(config)
-            config.build.rollupOptions.input = injectRollupInputs({ [serverEntryName]: serverEntryVirtualId }, config)
-          }
+          if (config._vitePluginServerEntry.disableServerEntryEmit) return
+          const { input } = serverRollupOptions
+          serverRollupOptions.input = injectRollupInputs({ [getServerEntryName(input)]: serverEntryVirtualId }, input)
         },
       },
     },
@@ -473,8 +477,17 @@ function isAutoImportDisabled(config: ConfigResolved): boolean {
   return config._vitePluginServerEntry.disableAutoImport || globalObject.cannotWriteFilesystem || isYarnPnP()
 }
 
-function getServerEntryName(config: ConfigResolved) {
-  const entries = normalizeRollupInput(config.build.rollupOptions.input)
+// The Rollup options of the server build, or null if this build has no server side.
+// Not the root config: under `builder.sharedConfigBuild` the root belongs to no environment, so its
+// `build.ssr` is false and its input is dropped, even though an SSR build exists.
+function getServerRollupOptions(config: ConfigResolved): EnvBuildConfig['build']['rollupOptions'] | null {
+  const envSsr = (config as { environments?: Record<string, EnvBuildConfig> }).environments?.ssr
+  if (envSsr) return envSsr.build.rollupOptions
+  return isViteServerSide(config, undefined) ? config.build.rollupOptions : null
+}
+
+function getServerEntryName(inputCurrent: undefined | string | string[] | Record<string, string>) {
+  const entries = normalizeRollupInput(inputCurrent)
   assert(
     entries[serverEntryFileNameBase] !== serverEntryVirtualId &&
       entries[serverEntryFileNameBaseAlternative] !== serverEntryVirtualId,
